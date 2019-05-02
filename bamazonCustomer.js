@@ -1,5 +1,6 @@
 const mysql = require('mysql');
 const inquirer = require('inquirer');
+const ctable = require('console.table')
 const connection = mysql.createConnection({
     host: 'localhost',
     port: 3306,
@@ -8,67 +9,79 @@ const connection = mysql.createConnection({
     database: 'bamazon'
 });
 
+//------------------------------------------//
+//             text  formatting             //
+//------------------------------------------//
 const newLine = "\n"
 const tab = "   "
 const textGreen = "\u001b[32m"
 const textRed = "\u001b[31m"
+const textBrightBlue =  "\u001b[34;1m"
 const textYellow = "\u001b[33m"
 const textCyan = "\u001b[36m"
 const textPlain = "\u001b[0m"
 
 
 
+//------------------------------------------//
+//               prompts                    //
+//------------------------------------------//
 const itemIdPrompt = {
     type: 'input',
     name: 'customerOrder',
-    message: newLine + 'What is the item_id of the product you would like to buy?'
+    message: newLine + textBrightBlue + 'What is the item_id of the product you would like to buy?' + textPlain
 }  
 const confirmItemPrompt = {
     type: 'confirm',
     name: 'checkOrder',
-    message: newLine + 'Is that correct?'
+    message: newLine + textBrightBlue +'Is that correct?' + textPlain
 }  
 const itemQuantityPrompt = {
     type: 'input',
     name: 'desiredQuantity',
-    message: newLine + 'Great, how many would you like?'
+    message: newLine + textBrightBlue +'Great, how many would you like?' + textPlain
 }
-
-
- 
-const orderOrChangeOrder = (stockQuantity) => {
+const action = (choices) => {
     return {
         type: 'list',
         name: 'action',
-        message: 'What would you like to do?',
-        choices: [
-            'order ' + stockQuantity,
-            'order a different amount',
-            'search for another product',
-            'exit'
-            
-        ]
+        message: textBrightBlue +'What would you like to do?' + textPlain,
+        choices: choices
     }
 } 
 
-const orderAnotherItem = {
-    type: 'list',
-    name: 'action',
-    message: 'What would you like to do?',
-    choices: [
+//------------------------------------------//
+//      choices for action prompt           //
+//------------------------------------------//
+
+const orderOrChangeOrder = (stockQuantity) => {
+    return [
+        'order ' + stockQuantity,
+        'order a different amount',
         'search for another product',
         'exit'
     ]
 }
+const orderAnotherItem = [
+    'search for another product',
+    'exit'
+]
 
 
-showProductsTable();
+//-----------------------------------------//
+//        display products available       //
+//-----------------------------------------//
+beginSession()
+function beginSession(){
+    console.log(newLine + newLine + textBrightBlue + "Welcome to Bamazon!" + textPlain)
+    showProductsTable();
+}
 function showProductsTable() {
     connection.query(
         'select item_id, product_name, price, FORMAT(price, 2) as price from products',
         (err, res) => {
             if (err) throw err;
-            console.table(res);
+            console.table(newLine + newLine+ 'Bamazon Products', res);
             idArray = []
             res.forEach(entry => idArray.push(entry.item_id));
             // connection.end();
@@ -79,33 +92,25 @@ function showProductsTable() {
     
 
 
-function askCustomer(question, item_ids, orderItem, itemList){
+function askCustomer(question, item_ids, orderItem, itemList, price, productSales){
     inquirer
         .prompt([question])
         .then((res) => {
-
-            for(let prop in res){
-                if (res[prop].toString().toUpperCase() == 'EXIT')
-                    return connection.end();
-            };
-
-            if(res.customerOrder){
-                let customerOrder = parseInt(res.customerOrder)
-
-                if (item_ids.indexOf(customerOrder) != -1){
-                    stateProductName(customerOrder, itemList)
-                    askCustomer(confirmItemPrompt, item_ids, res.customerOrder, itemList)
+            //   exit at any open-ended prompt
+            if(customerWishesToExit(res))
+                return connection.end()
+            //   customer has selected an item by ID
+            if(res.customerOrder || res.customerOrder == ""){
+                if (res.customerOrder.trim() == ""){
+                    console.log(newLine + textRed + 'No item selected' + newLine + textPlain)
+                    return askCustomer(question,item_ids,"",itemList)
                 }
-
-                else{
-                    console.log(newLine + textRed + 
-                        'Item Id not found' + textCyan + newLine + newLine +
-                        'Select from these available products.' + textPlain);
-                    showProductsTable();
-                }
-            }
-            else if (res.action){
+                else
+                    handleCustomerSelection(res.customerOrder,item_ids,itemList)
                
+            }
+            
+            else if (res.action){
                 switch (res.action) {
                     case 'order a different amount':
                         askCustomer(itemQuantityPrompt, '', orderItem, '');
@@ -116,12 +121,9 @@ function askCustomer(question, item_ids, orderItem, itemList){
                     case 'exit':
                         return connection.end();
                     default:
-                        // let quantity = res.action.match(/[0-9]/g).join().replace(/,/g,"")
-                        placeOrder(orderItem, 0)   
+                        let quantity = res.action.match(/[0-9]/g).join().replace(/,/g,"")
+                        placeOrder(orderItem, 0, quantity, price, productSales)   
                 }
-
-
-
             }
             //boolean response requires extra validation of has own property
             else if(res.hasOwnProperty('checkOrder')){
@@ -132,24 +134,23 @@ function askCustomer(question, item_ids, orderItem, itemList){
 
             } 
 
-
-            
             else{
-
                 connection.query(
-                    'select stock_quantity from products where ?',
+                    'select stock_quantity, price, product_sales from products where ?',
                     {
                         item_id: orderItem
-                    },
+                    },  
                     (err,resDB) => {
+                        let price = resDB[0].price
                         let stockQuantity = resDB[0].stock_quantity
+                        let productSales = resDB[0].product_sales
                         if (err) throw err;
 
                         if (res.desiredQuantity <= stockQuantity){
                             updatedStockQuantity = stockQuantity - res.desiredQuantity;
                             let itemId = parseInt(orderItem);
-                            console.log(updatedStockQuantity);
-                            placeOrder(itemId, updatedStockQuantity)
+                            // console.log(updatedStockQuantity);
+                            placeOrder(itemId, updatedStockQuantity, res.desiredQuantity, price, productSales)
                             
                         }
                         else {
@@ -160,7 +161,7 @@ function askCustomer(question, item_ids, orderItem, itemList){
                                     'Sorry we only have ' + stockQuantity +
                                     ' left in stock.' + newLine + newLine + textPlain
                                 );
-                                askCustomer(orderOrChangeOrder(stockQuantity),"",orderItem,"");
+                                askCustomer(action(orderOrChangeOrder(stockQuantity)),"", orderItem,"", price, productSales);
                             }
                             else{
                                 console.log(
@@ -168,7 +169,7 @@ function askCustomer(question, item_ids, orderItem, itemList){
                                     'Sorry we are all out of that item' +
                                     textPlain + newLine
                                 );
-                                askCustomer(orderAnotherItem);
+                                askCustomer(action(orderAnotherItem));
                             }
 
                         }
@@ -179,6 +180,34 @@ function askCustomer(question, item_ids, orderItem, itemList){
             
             
     })
+}
+
+function customerWishesToExit(res){
+    for(let prop in res){
+        let response = res[prop].toString().toUpperCase()
+        if ( response == 'EXIT' || response == 'QUIT' || response == "ESC"){
+            console.log(newLine + textBrightBlue + "Thanks for shopping at Bamazon!" + newLine + newLine + textPlain)
+            return true
+        }
+    };
+}
+
+function handleCustomerSelection(order,itemIdList,productsInfo){
+
+    let customerOrder = parseInt(order)
+
+    //  check that the ID selction is valid
+    if (itemIdList.indexOf(customerOrder) != -1){
+        stateProductName(customerOrder, productsInfo)
+        // ask customer to confirm selection
+        askCustomer(confirmItemPrompt, itemIdList, order, productsInfo)
+    }
+    else{
+        console.log(newLine + textRed + 
+            'Item Id not found' + textBrightBlue + newLine + newLine +
+            'Select from these available products.' + textPlain);
+        showProductsTable();
+    }
 }
 
 function stateProductName(id, list){
@@ -199,12 +228,17 @@ function stateProductName(id, list){
 
 
 
-function placeOrder(item, quantity){
+function placeOrder(item, newStockQuantity, orderQuantity, price, productSales){
+    let purchase = orderQuantity * price
+    let updatedProductSales = purchase + productSales
     connection.query(
-        'update products set ? where ?',
+        'update products set ?,? where ?',
         [
             {
-                stock_quantity: quantity
+                stock_quantity: newStockQuantity
+            },
+            {
+                product_sales: updatedProductSales
             },
             {
                 item_id: item
@@ -212,16 +246,14 @@ function placeOrder(item, quantity){
         ],
         (err,res) => {
             if (err) throw err;
-            let productOrProducts = (res.affectedRows > 1) ? "products" : "product"
-            console.log(res.affectedRows + " "+ productOrProducts + " updated" + newLine)
+            // console.log(res.affectedRows + " product updated" + newLine)
             
             console.log(
-                newLine + 
+                newLine + textGreen +
                 'Your Order has been placed' + 
-                newLine
+                newLine + textPlain
             );
-            askCustomer(orderAnotherItem)
+            askCustomer(action(orderAnotherItem));
         }
-
     )
 }

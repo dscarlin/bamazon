@@ -11,3 +11,5 @@
 
 ### Bamazon Supervisor Interface
 
+[![asciicast](https://asciinema.org/a/2DW5x0h05f6rcu22R0gPROuJW.svg)](https://asciinema.org/a/2DW5x0h05f6rcu22R0gPROuJW)
+
